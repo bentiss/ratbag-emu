@@ -109,6 +109,14 @@ class Device(object):
 
         self._actuators = val
 
+    @property
+    def event_nodes(self) -> List[str]:
+        return [node for endpoint in self.endpoints for node in endpoint.device_nodes]
+
+    @property
+    def hidraw_nodes(self) -> List[str]:
+        return [node for endpoint in self.endpoints for node in endpoint.hidraw_nodes]
+
     def destroy(self) -> None:
         for endpoint in self.endpoints:
             endpoint.destroy()
