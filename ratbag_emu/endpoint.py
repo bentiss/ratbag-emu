@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 
+import fcntl
 import logging
+import libevdev
+import os
 import struct
 import time
 import typing
@@ -25,6 +28,16 @@ class Endpoint(hidtools.uhid.UHIDDevice):
     :param number:  Endpoint number
     '''
 
+    input_type_mapping = {
+        'ID_INPUT_TOUCHSCREEN': 'Touch Screen',
+        'ID_INPUT_TOUCHPAD': 'Touch Pad',
+        'ID_INPUT_TABLET': 'Pen',
+        'ID_INPUT_MOUSE': 'Mouse',
+        'ID_INPUT_KEY': 'Key',
+        'ID_INPUT_JOYSTICK': 'Joystick',
+        'ID_INPUT_ACCELEROMETER': 'Accelerometer',
+    }
+
     def __init__(self, owner: 'Device', rdesc: List[int], number: int):
         super().__init__()
 
@@ -36,6 +49,8 @@ class Endpoint(hidtools.uhid.UHIDDevice):
         self.rdesc = rdesc
         self.number = number
         self.name = f'ratbag-emu {owner.id} ({owner.name}, {self.vid:04x}:{self.pid:04x}, {self.number})'
+        self._opened_files = []
+        self.input_nodes = {}
 
         self._output_report = self._receive
 
@@ -47,8 +62,59 @@ class Endpoint(hidtools.uhid.UHIDDevice):
 
         self.__logger.debug(f'created endpoint {self.number} ({self.name})')
 
+    def destroy(self):
+        for fd in self._opened_files:
+            fd.close()
+        return super().destroy()
+
+    def udev_input_event(self, device):
+        if 'DEVNAME' not in device.properties:
+            return
+
+        devname = device.properties['DEVNAME']
+        if not devname.startswith('/dev/input/event'):
+            return
+
+        # associate the Input type to the matching HID application
+        # we reuse the guess work from udev
+        types = []
+        for name, type in Endpoint.input_type_mapping.items():
+            if name in device.properties:
+                types.append(type)
+
+        if not types:
+            # abort, the device has not been processed by udev
+            print('abort', devname, list(device.properties.items()))
+            return
+
+        event_node = open(devname, 'rb')
+        self._opened_files.append(event_node)
+        evdev = libevdev.Device(event_node)
+
+        fd = evdev.fd.fileno()
+        flag = fcntl.fcntl(fd, fcntl.F_GETFD)
+        fcntl.fcntl(fd, fcntl.F_SETFL, flag | os.O_NONBLOCK)
+
+        for type in types:
+            self.input_nodes[type] = evdev
+
+    def udev_event(self, event):
+        if event.action != 'add':
+            return
+
+        device = event
+
+        subsystem = device.properties['SUBSYSTEM']
+
+        if subsystem == 'input':
+            return self.udev_input_event(device)
+
+        self.__logger.debug(f'{subsystem}: {device}')
+
     def uhid_dev_is_ready(self) -> bool:
-        return self.udev_device is not None
+        # we consider an endpoint to be ready when we have at least
+        # one opened evdev node
+        return bool(self.input_nodes)
 
     def _receive(self, data: List[int], size: int, rtype: int) -> None:
         '''
