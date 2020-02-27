@@ -263,6 +263,7 @@ class Device(object):
             for evdev_device in self.event_nodes:
                 self._event_buffer.extend(list(evdev_device.events()))
             self._event_thread_lock.release()
+            time.sleep(0.001)
 
     def pop_evdev_events(self):
         self._event_thread_lock.acquire()
