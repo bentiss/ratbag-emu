@@ -8,12 +8,7 @@ path = os.path.realpath(os.path.join(f, "..", "..", "src"))
 if path not in sys.path:
     sys.path.insert(0, path)
 
-import fcntl  # noqa: 402
-import threading  # noqa: 402
-
 import libevdev  # noqa: 402
-import pyudev  # noqa: 402
-
 import ratbag_emu  # noqa: 402
 
 import pytest  # noqa: 402
@@ -48,51 +43,11 @@ class TestBase(object):
             rules_dest.unlink()
             self.reload_udev_rules()
 
-    @pytest.fixture()
-    def fd_event_nodes(self, device, endpoint=0):
-        fds = []
-        for d in pyudev.Context().list_devices(subsystem='input'):
-            if 'NAME' in list(d.properties) and d.properties['NAME'].startswith(f'"ratbag-emu {device.id}'):
-                for c in d.children:
-                    if c.properties['DEVNAME'].startswith('/dev/input/event'):
-                        fd = open(c.properties['DEVNAME'], 'rb')
-                        fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK)
-                        fds.append(fd)
-
-        yield fds
-
-        for fd in fds:
-            fd.close()
-
-    @pytest.fixture()
-    def libevdev_event_nodes(self, fd_event_nodes):
-        devices = []
-        for fd in fd_event_nodes:
-            devices.append(libevdev.Device(fd))
-
-        return devices
-
-    def catch_evdev_events(self, device, evdev_devices, callback, wait=1):
-        evs = []
-        def collect_events(stop):  # noqa: 306
-            nonlocal evs
-            while not stop.is_set():
-                for evdev_device in evdev_devices:
-                    evs += list(evdev_device.events())
-
-        stop_event_thread = threading.Event()
-        event_thread = threading.Thread(target=collect_events,
-                                        args=(stop_event_thread,))
-        event_thread.start()
-
-        callback(device)
-
+    def catch_evdev_events(self, device, wait=1):
         sleep(wait)
-        stop_event_thread.set()
-        event_thread.join()
 
         received = EventData()
-        for e in evs:
+        for e in device.pop_evdev_events():
             if e.matches(libevdev.EV_REL.REL_X):
                 received.x += e.value
             elif e.matches(libevdev.EV_REL.REL_Y):
@@ -100,9 +55,7 @@ class TestBase(object):
 
         return received
 
-    def simulate(self, device, events, action):
-        def callback(device):
-            nonlocal action
-            device.simulate_action(action)
+    def simulate(self, device, action):
+        device.simulate_action(action)
 
-        return self.catch_evdev_events(device, events, callback, wait=action['duration']/1000 + 0.5)
+        return self.catch_evdev_events(device, wait=action['duration']/1000 + 0.5)

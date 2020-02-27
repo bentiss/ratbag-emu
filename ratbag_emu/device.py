@@ -39,6 +39,13 @@ class Device(object):
         for i, r in enumerate(rdescs):
             self.endpoints.append(Endpoint(self, r, i))
 
+        self._event_buffer = []
+        self._stop_event_thread = threading.Event()
+        self._event_thread_lock = threading.Lock()
+        self._event_thread = threading.Thread(target=self._collect_events)
+
+        self._event_thread.start()
+
         self.report_rate = 100
         self.fw = Firmware(self)
         self.hw: Dict[str, HWComponent] = {}
@@ -111,13 +118,15 @@ class Device(object):
 
     @property
     def event_nodes(self) -> List[str]:
-        return [node for endpoint in self.endpoints for node in endpoint.device_nodes]
+        return [node for endpoint in self.endpoints for node in endpoint.input_nodes.values()]
 
     @property
     def hidraw_nodes(self) -> List[str]:
         return [node for endpoint in self.endpoints for node in endpoint.hidraw_nodes]
 
     def destroy(self) -> None:
+        self._stop_event_thread.set()
+        self._event_thread.join()
         for endpoint in self.endpoints:
             endpoint.destroy()
         self.device_list.remove(self.id)
@@ -247,3 +256,17 @@ class Device(object):
 
         sim_thread = threading.Thread(target=send_packets)
         sim_thread.start()
+
+    def _collect_events(self):
+        while not self._stop_event_thread.is_set():
+            self._event_thread_lock.acquire()
+            for evdev_device in self.event_nodes:
+                self._event_buffer.extend(list(evdev_device.events()))
+            self._event_thread_lock.release()
+
+    def pop_evdev_events(self):
+        self._event_thread_lock.acquire()
+        buf = self._event_buffer
+        self._event_buffer = []
+        self._event_thread_lock.release()
+        return buf

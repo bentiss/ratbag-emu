@@ -78,7 +78,7 @@ class TestDevice(TestDeviceBase):
                 SensorActuator(dpi=1000)
             ]
 
-    def test_mouse_report(self, device, libevdev_event_nodes):
+    def test_mouse_report(self, device):
         '''
         Test single HID report
         '''
@@ -86,16 +86,14 @@ class TestDevice(TestDeviceBase):
 
         expected = EventData(x, y)
 
-        def callback(device):
-            nonlocal expected
-            device.send_hid_action(expected)
+        device.send_hid_action(expected)
 
-        received = self.catch_evdev_events(device, libevdev_event_nodes, callback)
+        received = self.catch_evdev_events(device)
 
         assert expected.x <= received.x <= expected.x
         assert expected.y <= received.y <= expected.y
 
-    def test_movement(self, device, libevdev_event_nodes):
+    def test_movement(self, device):
         '''
         Test normal mouse movement
         '''
@@ -114,14 +112,14 @@ class TestDevice(TestDeviceBase):
             }
         }
 
-        received = self.simulate(device, libevdev_event_nodes, action)
+        received = self.simulate(device, action)
 
         expected = EventData.from_action(dpi, action)
 
         assert received.x == expected.x
         assert received.y == expected.y
 
-    def test_movement_max(self, device, libevdev_event_nodes):
+    def test_movement_max(self, device):
         '''
         Make sure we raise an error when we try to move more than possible
         '''
@@ -140,7 +138,7 @@ class TestDevice(TestDeviceBase):
         }
 
         with pytest.raises(AssertionError):
-            self.simulate(device, libevdev_event_nodes, action)
+            self.simulate(device, action)
 
     def test_duplicated_id(self):
         random.seed(0)
